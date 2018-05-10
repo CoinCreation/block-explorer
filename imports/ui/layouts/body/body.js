@@ -1,12 +1,21 @@
 import './body.html'
 import './sidebar.html'
-/* global WALLET_VERSION */
+import { EXPLORER_VERSION } from '../../../startup/both/index.js'
 
 BlazeLayout.setRoot('body')
 Template.appBody.onRendered(() => {
   $('.ui.dropdown').dropdown()
   $('.modal').modal()
-  //$('.sidebar').first().sidebar('attach events', '#hamburger', 'show')
+  // $('.sidebar').first().sidebar('attach events', '#hamburger', 'show')
+
+  Session.set('connectionStatus', {})
+  Meteor.call('connectionStatus', (err, res) => {
+    if (err) {
+      Session.set('connectionStatus', { error: err, colour: 'red' })
+    } else {
+      Session.set('connectionStatus', res)
+    }
+  })
 })
 
 const identifySearch = (str) => {
@@ -43,7 +52,7 @@ Template.appBody.events({
     const s = $(event.currentTarget).prev().val()
     postSearch(identifySearch(s))
   },
-  'keypress input': (event) => {
+  'keypress #mainSearch': (event) => {
     if (event.keyCode === 13) {
       // console.log('search clicked')
       if ($(':focus').is('input')) {
@@ -55,38 +64,53 @@ Template.appBody.events({
     }
     return true
   },
+  'click #sidebarConnectionStatus': () => {
+    // TODO: modal here
+  },
 })
 
 Template.appBody.helpers({
   /* Active Menu Item Helpers */
   menuBlocksActive() {
-    if(
-      (FlowRouter.getRouteName() == "Block.home") ||
-      (FlowRouter.getRouteName() == "Lastblocks.home")
-      
-      ) {
+    if (
+      (FlowRouter.getRouteName() === 'Block.home') ||
+      (FlowRouter.getRouteName() === 'Lastblocks.home')
+    ) {
       return 'active'
     }
+    return ''
   },
   menuTransactionsActive() {
-    if(
-      (FlowRouter.getRouteName() == "Lasttx.home") ||
-      (FlowRouter.getRouteName() == "Tx.home") || 
-      (FlowRouter.getRouteName() == "Address.home")
-      ) {
+    if (
+      (FlowRouter.getRouteName() === 'Lasttx.home') ||
+      (FlowRouter.getRouteName() === 'Tx.home') ||
+      (FlowRouter.getRouteName() === 'Address.home')
+    ) {
       return 'active'
     }
+    return ''
   },
   menuUnconfirmedTransactionsActive() {
-    if(
-      (FlowRouter.getRouteName() == "Lastunconfirmedtx.home")
-      ) {
+    if (
+      (FlowRouter.getRouteName() === 'Lastunconfirmedtx.home')
+    ) {
       return 'active'
     }
+    return ''
   },
-
+  menuPeersActive() {
+    if (
+      (FlowRouter.getRouteName() === 'Peerstats.home')
+    ) {
+      return 'active'
+    }
+    return ''
+  },
   qrlExplorerVersion() {
     return EXPLORER_VERSION
+  },
+  connectionStatus() {
+    return Session.get('connectionStatus')
   },
 })
 

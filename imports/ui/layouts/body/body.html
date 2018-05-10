@@ -1,7 +1,4 @@
 <template name="appBody">
-
-  
-
   <!-- Main Menu -->
   <div class="ui visible left vertical inverted sidebar labeled icon menu">
       <a href="/" class="item logoArea">
@@ -20,6 +17,10 @@
         <i class="help circle icon"></i>
         Unconfirmed<br />Transactions
       </a>
+      <a href="/peers" class="item main-menu-btn {{menuPeersActive}}">
+        <i class="sitemap layout icon"></i>
+        Peers
+      </a>
       <a href="http://wallet.theqrl.org/" target="_blank" class="item main-menu-btn">
         <i class="send outline icon"></i>
         Wallet
@@ -37,7 +38,7 @@
         <!-- Search Box -->
         <div class="ui selection floatright">
           <div class="ui icon input">
-            <input style="width:400px !important" type="text" placeholder="tx, address, block index">
+            <input style="width:400px !important" type="text" placeholder="tx, address, block index" id="mainSearch">
             <i class="search link icon"></i>
           </div>
         </div>
@@ -67,5 +68,4 @@
         </div>
       </div>
   </div>
-
 </template>

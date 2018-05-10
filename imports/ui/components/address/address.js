@@ -5,10 +5,12 @@ import JSONFormatter from 'json-formatter-js'
 import qrlAddressValdidator from '@theqrl/validate-qrl-address'
 import './address.html'
 import '../../stylesheets/overrides.css'
+import { numberToString, SHOR_PER_QUANTA } from '../../../startup/both/index.js'
+import { addressForAPI, bytesToString } from '../../../startup/client/index.js'
 
 let tokensHeld = []
 
-const ab2str = buf => String.fromCharCode.apply(null, new Uint16Array(buf))
+// const ab2str = buf => String.fromCharCode.apply(null, new Uint16Array(buf))
 
 const addressResultsRefactor = (res) => {
   // rewrite all arrays as strings (Q-addresses) or hex (hashes)
@@ -47,12 +49,11 @@ const addressResultsRefactor = (res) => {
 
 function loadAddressTransactions(txArray) {
   const request = {
-    tx: txArray
+    tx: txArray,
   }
 
   Session.set('addressTransactions', [])
   $('#loadingTransactions').show()
-  
   Meteor.call('addressTransactions', request, (err, res) => {
     if (err) {
       Session.set('addressTransactions', { error: err })
@@ -68,39 +69,41 @@ function loadAddressTransactions(txArray) {
 
 const getTokenBalances = (getAddress, callback) => {
   const request = {
-    address: addressForAPI(getAddress)
+    address: addressForAPI(getAddress),
   }
 
   Meteor.call('getAddressState', request, (err, res) => {
     if (err) {
       // TODO - Error handling
     } else {
+      // Now for each res.state.token we find, go discover token name and symbol
+      // eslint-disable-next-line
       if (res.state.address !== '') {
-        // Now for each res.state.token we find, go discover token name and symbol
-        for (let i in res.state.tokens) {
-          const tokenHash = i
-          const tokenBalance = res.state.tokens[i]
+        Object.keys(res.state.tokens).forEach((key) => {
+          const tokenHash = key
+          const tokenBalance = res.state.tokens[key]
 
-          let thisToken = {}
+          const thisToken = {}
 
-          const request = {
-            query: Buffer.from(tokenHash, 'hex')
+          const req = {
+            query: Buffer.from(tokenHash, 'hex'),
           }
 
-          Meteor.call('getObject', request, (err, res) => {
+          Meteor.call('getObject', req, (objErr, objRes) => {
             if (err) {
               // TODO - Error handling here
-              console.log('err:', err)
+              console.log('err:', objErr)
             } else {
               // Check if this is a token hash.
-              if (res.transaction.tx.transactionType !== "token") {
+              // eslint-disable-next-line
+              if (objRes.transaction.tx.transactionType !== "token") {
                 // TODO - Error handling here
               } else {
-                let tokenDetails = res.transaction.tx.token
+                const tokenDetails = objRes.transaction.tx.token
 
                 thisToken.hash = tokenHash
                 thisToken.name = bytesToString(tokenDetails.name)
-                thisToken.symbol = bytesToString(tokenDetails.symbol)
+                thisToken.symbol = bytesToString(tokenDetails.symbol) // eslint-disable-next-line
                 thisToken.balance = tokenBalance / Math.pow(10, tokenDetails.decimals)
 
                 tokensHeld.push(thisToken)
@@ -109,7 +112,7 @@ const getTokenBalances = (getAddress, callback) => {
               }
             }
           })
-        }
+        })
 
         callback()
 
@@ -126,17 +129,19 @@ const getTokenBalances = (getAddress, callback) => {
 
 const renderAddressBlock = () => {
   const aId = FlowRouter.getParam('aId')
+  let tPage = FlowRouter.getParam('tPage')
+  tPage = parseInt(tPage, 10)
+  if (!tPage) { tPage = 1 }
   if (aId) {
     const req = {
       address: addressForAPI(aId),
     }
-
     Meteor.call('getAddressState', req, (err, res) => {
       if (err) {
         Session.set('address', { error: err, id: aId })
       } else {
         if (res) {
-          res.state.address = 'Q' + Buffer.from(res.state.address).toString('hex')
+          res.state.address = `Q${Buffer.from(res.state.address).toString('hex')}`
           res.state.balance = (parseInt(res.state.balance, 10) / SHOR_PER_QUANTA).toFixed(9)
           if (!(res.state.address)) {
             res.state.address = aId
@@ -158,11 +163,12 @@ const renderAddressBlock = () => {
             to: ((pages.length + 1) * 10) + 10,
           })
         }
+        let txArray = null
         Session.set('pages', pages)
-        let txArray = res.state.transactions.reverse()
-        if (txArray.length > 10) {
-          txArray = txArray.slice(0, 9)
-        }
+        Session.set('active', tPage)
+        const startIndex = (tPage - 1) * 10
+        txArray = res.state.transactions.reverse().slice(startIndex, startIndex + 10)
+        Session.set('fetchedTx', false)
         loadAddressTransactions(txArray)
       }
     })
@@ -188,6 +194,7 @@ Template.address.helpers({
       if ((active - 5) <= 0) {
         ret = ret.slice(0, 9)
       } else {
+        // eslint-disable-next-line
         if ((active + 10) > ret.length) {
           ret = ret.slice(ret.length - 10, ret.length)
         } else {
@@ -205,45 +212,57 @@ Template.address.helpers({
     return ret
   },
   addressTransactions() {
-    const transactions = []
-    const thisAddress = Session.get('address').state.address
-    _.each(Session.get('addressTransactions'), (transaction) => {
-      // Store modified transaction
-      const y = transaction
-      
-      // Update timestamp from unix epoch to human readable time/date.
-      if (moment.unix(transaction.timestamp).isValid()) {
-        y.timestamp = moment.unix(transaction.timestamp).format('HH:mm D MMM YYYY')
-      } else {
-        y.timestamp = 'Unconfirmed Tx'
-      }
+    try {
+      const transactions = []
+      const thisAddress = Session.get('address').state.address
+      _.each(Session.get('addressTransactions'), (transaction) => {
+        // Store modified transaction
+        const y = transaction
 
-      // Set total received amount if sent to this address
-      let thisReceivedAmount = 0
-      if ((transaction.type === 'transfer') || (transaction.type === 'transfer_token')) {
-        _.each(transaction.outputs, (output) => {
-          if(output.address == thisAddress) {
-            thisReceivedAmount += parseFloat(output.amount)
-          }
-        })
-      }
-      y.thisReceivedAmount = numberToString(thisReceivedAmount)
+        // Update timestamp from unix epoch to human readable time/date.
+        if (moment.unix(transaction.timestamp).isValid()) {
+          y.timestamp = moment.unix(transaction.timestamp).format('HH:mm D MMM YYYY')
+        } else {
+          y.timestamp = 'Unconfirmed Tx'
+        }
 
-      transactions.push(y)
-    })
-    return transactions
+        // Set total received amount if sent to this address
+        let thisReceivedAmount = 0
+        if ((transaction.type === 'transfer') || (transaction.type === 'transfer_token')) {
+          _.each(transaction.outputs, (output) => {
+            if (output.address === thisAddress) {
+              thisReceivedAmount += parseFloat(output.amount)
+            }
+          })
+        }
+        y.thisReceivedAmount = numberToString(thisReceivedAmount)
+
+        transactions.push(y)
+      })
+      return transactions
+    } catch (e) {
+      return false
+    }
   },
   addressHasTransactions() {
-    if(Session.get('addressTransactions').length > 0) {
-      return true
+    try {
+      if (Session.get('addressTransactions').length > 0) {
+        return true
+      }
+      return false
+    } catch (e) {
+      return false
     }
-    return false
   },
   isThisAddress(address) {
-    if(address == Session.get('address').state.address) {
-      return true
+    try {
+      if (address === Session.get('address').state.address) {
+        return true
+      }
+      return false
+    } catch (e) {
+      return false
     }
-    return false
   },
   QRtext() {
     return FlowRouter.getParam('aId')
@@ -275,7 +294,8 @@ Template.address.helpers({
   },
   isActive() {
     let ret = ''
-    if (this.number === Session.get('active')) {
+    const tPage = parseInt(FlowRouter.getParam('tPage'), 10)
+    if ((this.number === Session.get('active')) || (tPage === this.number)) {
       ret = 'active'
     }
     return ret
@@ -296,43 +316,48 @@ Template.address.helpers({
   },
   pagination() {
     let ret = false
-    if (Session.get('pages').length > 1) {
-      ret = true
+    if (Session.get('pages')) {
+      if (Session.get('pages').length > 1) {
+        ret = true
+      }
     }
     return ret
   },
+  currentPage() {
+    return Session.get('active')
+  },
   isTransfer(txType) {
-    if(txType == "transfer") {
+    if (txType === 'transfer') {
       return true
     }
     return false
   },
   isTokenCreation(txType) {
-    if(txType == "token") { 
+    if (txType === 'token') {
       return true
     }
     return false
   },
   isTokenTransfer(txType) {
-    if(txType == "transfer_token") {
+    if (txType === 'transfer_token') {
       return true
     }
     return false
   },
   isCoinbaseTxn(txType) {
-    if(txType == "coinbase") {
+    if (txType === 'coinbase') {
       return true
     }
     return false
   },
   isSlaveTxn(txType) {
-    if(txType == "slave") {
+    if (txType === 'slave') {
       return true
     }
     return false
   },
   isLatticePKTxn(txType) {
-    if(txType == "latticePK") {
+    if (txType === 'latticePK') {
       return true
     }
     return false
@@ -341,20 +366,40 @@ Template.address.helpers({
     return Session.get('tokensHeld')
   },
   addressValidation() {
-    const thisAddress = Session.get('address').state.address
-    const validationResult = qrlAddressValdidator.hexString(thisAddress)
-
-    let result = {}
-    result.height = validationResult.sig.height
-    result.totalSignatures = validationResult.sig.number
-    result.signatureScheme = validationResult.sig.type
-    result.hashFunction = validationResult.hash.function
-
-    return result
+    try {
+      const thisAddress = Session.get('address').state.address
+      // https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators/Destructuring_assignment
+      const { keysConsumed } = Session.get('address').ots
+      const validationResult = qrlAddressValdidator.hexString(thisAddress)
+      const result = {}
+      result.height = validationResult.sig.height
+      result.totalSignatures = validationResult.sig.number
+      result.keysRemaining = result.totalSignatures - keysConsumed
+      result.signatureScheme = validationResult.sig.type
+      result.hashFunction = validationResult.hash.function
+      return result
+    } catch (e) {
+      return false
+    }
+  },
+  totalPages() {
+    if (Session.get('pages')) {
+      return Session.get('pages').length
+    }
+    return false
   },
 })
 
 Template.address.events({
+  'keypress #paginator': (event) => {
+    if (event.keyCode === 13) {
+      const x = $('#paginator').val()
+      const max = Session.get('pages').length
+      if ((x < (max + 1)) && (x > 0)) {
+        FlowRouter.go(`/a/${FlowRouter.getParam('aId')}/${x}`)
+      }
+    }
+  },
   'click .refresh': () => {
     Session.set('address', {})
     renderAddressBlock()
@@ -379,7 +424,7 @@ Template.address.events({
     } else {
       const a = event.target.getAttribute('qrl-data')
       b = Session.get('active')
-      const c = Session.get('pages')
+      const c = Session.get('pages').length
       if (a === 'forward') {
         b += 1
       }
@@ -393,12 +438,12 @@ Template.address.events({
         b = 1
       }
     }
-    const startIndex = (b - 1) * 10
+    // const startIndex = (b - 1) * 10
     Session.set('active', b)
-    const txArray = Session.get('address').state.transactions.reverse().slice(startIndex, startIndex + 10)
-    $('.loader').show()
     Session.set('fetchedTx', false)
-    loadAddressTransactions(txArray)
+    $('.loader').show()
+    $('#loadingTransactions').show()
+    FlowRouter.go(`/a/${FlowRouter.getParam('aId')}/${b}`)
   },
 })
 
@@ -421,8 +466,7 @@ Template.address.onRendered(() => {
   Session.set('tokensHeld', [])
 
   // Get Tokens and Balances
-  getTokenBalances(FlowRouter.getParam('aId'), function() {
+  getTokenBalances(FlowRouter.getParam('aId'), () => {
     $('#tokenBalancesLoading').hide()
   })
-
 })
